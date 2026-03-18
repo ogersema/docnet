@@ -2,6 +2,7 @@ import { useEffect, useRef, useMemo, useState } from 'react';
 import * as d3 from 'd3';
 import type { Relationship, GraphNode, GraphLink } from '../types';
 import { fetchActorCount } from '../api';
+import { uiConfig } from '../config';
 
 interface NetworkGraphProps {
   relationships: Relationship[];
@@ -29,7 +30,7 @@ export default function NetworkGraph({
   const graphData = useMemo(() => {
     const nodeMap = new Map<string, GraphNode>();
     const links: GraphLink[] = [];
-    const EPSTEIN_NAME = 'Jeffrey Epstein';
+    const PRINCIPAL_NAME = uiConfig.principalName || null;
 
     // First pass: build complete graph and deduplicate edges
     const edgeMap = new Map<string, GraphLink & { count: number }>();
@@ -82,13 +83,13 @@ export default function NetworkGraph({
     // Convert edge map to array
     links.push(...Array.from(edgeMap.values()));
 
-    // BFS to calculate distances from Jeffrey Epstein
+    // BFS to calculate distances from principal (if configured)
     const distances = new Map<string, number>();
     const queue: string[] = [];
 
-    if (nodeMap.has(EPSTEIN_NAME)) {
-      distances.set(EPSTEIN_NAME, 0);
-      queue.push(EPSTEIN_NAME);
+    if (PRINCIPAL_NAME && nodeMap.has(PRINCIPAL_NAME)) {
+      distances.set(PRINCIPAL_NAME, 0);
+      queue.push(PRINCIPAL_NAME);
     }
 
     // Build adjacency list
@@ -104,7 +105,7 @@ export default function NetworkGraph({
       adjacency.get(targetId)!.add(sourceId);
     });
 
-    // BFS from Epstein
+    // BFS from principal
     while (queue.length > 0) {
       const current = queue.shift()!;
       const currentDistance = distances.get(current)!;
@@ -118,21 +119,21 @@ export default function NetworkGraph({
       });
     }
 
-    // Count direct connections TO Epstein for each node
-    const directConnectionsToEpstein = new Map<string, number>();
+    // Count direct connections to principal for each node
+    const directConnectionsToPrincipal = new Map<string, number>();
     links.forEach(link => {
       const sourceId = typeof link.source === 'string' ? link.source : link.source.id;
       const targetId = typeof link.target === 'string' ? link.target : link.target.id;
 
-      if (sourceId === EPSTEIN_NAME) {
-        directConnectionsToEpstein.set(targetId, (directConnectionsToEpstein.get(targetId) || 0) + 1);
+      if (sourceId === PRINCIPAL_NAME) {
+        directConnectionsToPrincipal.set(targetId, (directConnectionsToPrincipal.get(targetId) || 0) + 1);
       }
-      if (targetId === EPSTEIN_NAME) {
-        directConnectionsToEpstein.set(sourceId, (directConnectionsToEpstein.get(sourceId) || 0) + 1);
+      if (targetId === PRINCIPAL_NAME) {
+        directConnectionsToPrincipal.set(sourceId, (directConnectionsToPrincipal.get(sourceId) || 0) + 1);
       }
     });
 
-    const maxDirectToEpstein = Math.max(...Array.from(directConnectionsToEpstein.values()), 1);
+    const maxDirectToPrincipal = Math.max(...Array.from(directConnectionsToPrincipal.values()), 1);
 
     // Calculate average connections per hop distance for density filtering
     const connectionsByHop = new Map<number, number[]>();
@@ -156,18 +157,25 @@ export default function NetworkGraph({
     const densityThreshold = minDensity / 100;
     const nodesToKeep = new Set<string>();
 
-    // Always keep Epstein
-    nodesToKeep.add(EPSTEIN_NAME);
+    // Always keep principal
+    if (PRINCIPAL_NAME) nodesToKeep.add(PRINCIPAL_NAME);
 
-    // Keep nodes above density threshold
-    for (const node of nodeMap.values()) {
-      const hopDistance = distances.get(node.id) ?? Infinity;
-      const avgForHop = averageByHop.get(hopDistance);
+    // When no principal is configured, BFS distances are empty — skip density filtering
+    if (!PRINCIPAL_NAME || densityThreshold === 0) {
+      for (const node of nodeMap.values()) {
+        nodesToKeep.add(node.id);
+      }
+    } else {
+      // Keep nodes above density threshold
+      for (const node of nodeMap.values()) {
+        const hopDistance = distances.get(node.id) ?? Infinity;
+        const avgForHop = averageByHop.get(hopDistance);
 
-      if (avgForHop !== undefined) {
-        const threshold = avgForHop * densityThreshold;
-        if (node.val >= threshold) {
-          nodesToKeep.add(node.id);
+        if (avgForHop !== undefined) {
+          const threshold = avgForHop * densityThreshold;
+          if (node.val >= threshold) {
+            nodesToKeep.add(node.id);
+          }
         }
       }
     }
@@ -199,22 +207,22 @@ export default function NetworkGraph({
       filteredConnectionsMap.set(targetId, (filteredConnectionsMap.get(targetId) || 0) + count);
     });
 
-    // Color nodes based on direct connections to Epstein and distance
+    // Color nodes based on direct connections to principal and distance
     const nodes = Array.from(nodeMap.values())
       .filter(node => nodesToKeep.has(node.id))
       .map(node => {
       const distance = distances.get(node.id) ?? Infinity;
-      const directCount = directConnectionsToEpstein.get(node.id) || 0;
+      const directCount = directConnectionsToPrincipal.get(node.id) || 0;
       let color: string;
 
-      if (node.id === EPSTEIN_NAME) {
-        // Epstein himself - red
+      if (node.id === PRINCIPAL_NAME) {
+        // Principal - red
         color = '#dc2626'; // red-600
       } else if (directCount > 0) {
-        // Has direct connections to Epstein - seamless hue gradient based on count
+        // Has direct connections to principal - seamless hue gradient based on count
         // ratio 1.0 (max connections) → hue 15 (orange-red)
         // ratio 0.0 (min connections) → hue 45 (yellow)
-        const ratio = directCount / maxDirectToEpstein;
+        const ratio = directCount / maxDirectToPrincipal;
         const hue = 45 - (ratio * 30); // Smooth gradient from yellow to orange-red
         color = `hsl(${hue}, 80%, 60%)`; // constant saturation
       } else if (distance === 2 || distance === 3) {
@@ -283,8 +291,9 @@ export default function NetworkGraph({
       .range([minRadius, maxRadius])
       .clamp(true);
 
-    // Find Epstein node to center around
-    const epsteinNode = graphData.nodes.find(n => n.id === 'Jeffrey Epstein');
+    // Find principal node to center around
+    const principalName = uiConfig.principalName || null;
+    const principalNode = principalName ? graphData.nodes.find(n => n.id === principalName) : undefined;
 
     // Create simulation
     const simulation = d3.forceSimulation(graphData.nodes as any)

@@ -121,8 +121,8 @@ async function analyzeCandidateGroup(group: CandidateGroup): Promise<LLMMergeDec
   const prompt = `Analyze these entity names and determine which should be merged (same person) vs kept separate (different people).
 
 RULES:
-- DO merge: name variations, nicknames, case differences (Jeffrey Epstein = Jeff Epstein = jeffrey epstein)
-- DO NOT merge: numbered entities (Jane Doe 1 ≠ Jane Doe 2), family members (George H.W. Bush ≠ George W. Bush), generic vs specific (Jeffrey ≠ Jeffrey Epstein)
+- DO merge: name variations, nicknames, case differences (John Smith = J. Smith = john smith)
+- DO NOT merge: numbered entities (Jane Doe 1 ≠ Jane Doe 2), family members (George H.W. Bush ≠ George W. Bush), generic vs specific (John ≠ John Smith)
 
 Names (${group.names.length} total):
 ${group.names.map((n, i) => `${i + 1}. ${n}`).join('\n')}

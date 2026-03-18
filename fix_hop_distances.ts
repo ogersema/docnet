@@ -1,4 +1,5 @@
 import Database from 'better-sqlite3';
+import { config } from './config';
 
 const db = new Database('document_analysis.db');
 
@@ -76,16 +77,16 @@ for (const rel of relationshipsResult) {
 
 console.log(`✓ Built graph with ${adjacencyList.size} nodes and ${relationshipsResult.length} edges\n`);
 
-// Step 5: BFS from Jeffrey Epstein to calculate hop distances
-console.log('Calculating hop distances from Jeffrey Epstein using BFS...');
-const PRINCIPAL = 'Jeffrey Epstein';
+// Step 5: BFS from principal to calculate hop distances
+const PRINCIPAL = config.principal.name || '';
+console.log(`Calculating hop distances from ${PRINCIPAL} using BFS...`);
 const DISCONNECTED_HOP_DISTANCE = 1000;
 
 const hopDistances = new Map<string, number>();
 const queue: { name: string; distance: number }[] = [];
 const visited = new Set<string>();
 
-// Find canonical name for Jeffrey Epstein
+// Find canonical name for principal
 const principalCanonical = canonicalMap.get(PRINCIPAL) || PRINCIPAL;
 
 if (adjacencyList.has(principalCanonical)) {

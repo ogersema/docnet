@@ -11,10 +11,13 @@
   },
   "dependencies": {
     "@types/d3": "^7.4.3",
+    "@types/react-router-dom": "^5.3.3",
     "d3": "^7.9.0",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
-    "react-force-graph": "^1.48.1"
+    "react-force-graph": "^1.48.1",
+    "react-router-dom": "^6.30.3",
+    "xlsx": "^0.18.5"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.1",

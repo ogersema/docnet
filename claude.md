@@ -1,354 +1,340 @@
-# Epstein Document Network Explorer
+# DocNet – Document Network Explorer
+## Claude Code Project Bible — Variant B (Multi-User, Self-Hosted)
 
-An intelligent document analysis and network visualization system that processes legal documents to extract relationships, entities, and events, then visualizes them as an interactive knowledge graph.
+> This file supersedes the Variant A CLAUDE.md.
+> Read it completely before making any changes.
+> When in doubt: read this file, then the relevant PHASE_X.md, then act.
 
-## Project Overview
+---
 
-This project analyzes the Epstein document corpus to extract structured information about actors, actions, locations, and relationships. It uses Claude AI for intelligent extraction and presents findings through an interactive network visualization interface.
+## What This Project Is
 
-**Live Demo:** [Deployed on Render](https://epstein-doc-explorer-1.onrender.com/)
+A self-hosted, multi-user document analysis and network visualization platform.
+Reporters upload PDF files or submit URLs. The system uses Claude AI to extract
+structured relationships (RDF triples: Actor → Action → Target), stores them
+per-project in PostgreSQL, and visualizes them as an interactive force-directed
+knowledge graph.
+
+Hosted on a Hetzner VPS. Accessed via browser. No terminal required for
+end users (reporters). Admins manage the server; reporters use the web UI.
 
 ---
 
 ## Architecture Overview
 
-The project has two main phases:
-
-### 1. Analysis Pipeline
-**Purpose:** Extract structured data from raw documents using AI
-**Technology:** TypeScript, Claude AI (Anthropic), SQLite
-**Location:** Root directory + `analysis_pipeline/`
-
-### 2. Visualization Interface
-**Purpose:** Interactive exploration of the extracted relationship network
-**Technology:** React, TypeScript, Vite, D3.js/Force-Graph
-**Location:** `network-ui/`
-
----
-
-## Key Features
-
-### Analysis Pipeline Features
-- **AI-Powered Extraction:** Uses Claude to extract entities, relationships, and events from documents
-- **Semantic Tagging:** Automatically tags triples with contextual metadata (legal, financial, travel, etc.)
-- **Tag Clustering:** Groups 1400+ tags into 21 semantic clusters for better filtering
-- **Entity Deduplication:** Merges duplicate entities using LLM-based similarity detection
-- **Incremental Processing:** Supports analyzing new documents without reprocessing everything
-- **Top-3 Cluster Assignment:** Each relationship is assigned to its 3 most relevant tag clusters
-
-### Visualization Features
-- **Interactive Network Graph:** Force-directed graph with 15,000+ relationships
-- **Actor-Centric Views:** Click any actor to see their specific relationships
-- **Smart Filtering:** Filter by 21 content categories (Legal, Financial, Travel, etc.)
-- **Timeline View:** Chronological relationship browser with document links
-- **Document Viewer:** Full-text document display with highlighting
-- **Responsive Design:** Works on desktop and mobile devices
-- **Performance Optimized:** Uses materialized database columns for fast filtering
-
----
-
-## Project Structure
-
 ```
-docnetwork/
-├── analysis_pipeline/          # Document analysis scripts
-│   ├── extract_data.py        # Initial document extraction
-│   ├── analyze_documents.ts   # Main AI analysis pipeline
-│   ├── cluster_tags.ts        # Tag clustering with AI
-│   ├── dedupe_with_llm.ts     # Entity deduplication
-│   └── extracted/             # Raw extracted documents
-│
-├── network-ui/                 # React visualization app
-│   ├── src/
-│   │   ├── components/        # React components
-│   │   ├── api.ts            # Backend API client
-│   │   └── App.tsx           # Main application
-│   └── dist/                  # Production build
-│
-├── api_server.ts              # Express API server
-├── document_analysis.db       # SQLite database (68MB)
-├── tag_clusters.json          # 21 semantic tag clusters
-├── add_top_clusters_column.ts # Migration: materialize top clusters
-└── add_misc_cluster.ts        # Migration: add Misc category
+Browser (Reporter)
+      │
+      ▼
+nginx (port 80/443, TLS via Let's Encrypt)
+      │
+      ├── /api/*  ──▶  Express API Server (Node, port 3001)
+      │                    │
+      │                    ├── Auth middleware (JWT)
+      │                    ├── Routes: auth, users, projects, upload, jobs, graph
+      │                    ├── PostgresAdapter (implements IStorageAdapter)
+      │                    └── File storage (PDFs on disk: /var/docnet/uploads/)
+      │
+      └── /*  ──▶  Static React build (served by nginx from /var/docnet/dist/)
+
+Background Processes (managed by PM2):
+  - api_server          (Express, always on)
+  - analysis_worker     (Job queue consumer, always on)
 ```
 
 ---
 
-## Core Components
+## Critical Rules
 
-### Analysis Pipeline
+### 1. Security-First
+Every API endpoint that touches user data **must** go through `authMiddleware`.
+No exceptions. Every database query **must** filter by `project_id` AND verify
+that the project belongs to the requesting user.
 
-#### 1. Document Extraction (`analysis_pipeline/extract_data.py`)
-**Purpose:** Extract raw text from PDF documents
-**Input:** PDF files in `data/documents/`
-**Output:** JSON files in `analysis_pipeline/extracted/`
-**Key Features:**
-- Preserves document metadata (ID, category, date)
-- Handles various PDF formats
-- Stores full text for AI analysis
+Never trust `project_id` from request body — always derive it from the
+authenticated user's session or verify ownership explicitly.
 
-#### 2. Document Analysis (`analysis_pipeline/analyze_documents.ts`)
-**Purpose:** Main AI-powered extraction pipeline
-**Input:** Extracted JSON documents
-**Output:** SQLite database with entities and relationships
-**Key Features:**
-- Uses Claude to extract RDF-style triples (subject-action-object)
-- Extracts temporal information (dates, timestamps)
-- Tags relationships with contextual metadata
-- Handles batch processing with rate limiting
-- Stores document full text for search
+### 2. Project Isolation
+A user must never see another user's data. This is the invariant that must
+hold everywhere:
+- All queries include `WHERE project_id = $1`
+- All file paths include the project UUID as a directory prefix
+- Upload endpoints verify project ownership before writing
 
-**Database Schema:**
+### 3. Async by Default
+Document analysis (PDF and web) is slow. It must never happen synchronously
+in an HTTP request handler. Every analysis task goes through the job queue.
+The API returns `{ jobId }` immediately. The client polls `/api/jobs/:id`.
+
+### 4. PostgreSQL Only
+No `better-sqlite3` imports anywhere except `storage/SqliteAdapter.ts`
+(kept for Variant A compatibility). All Variant B code uses `pg` via
+`storage/PostgresAdapter.ts`.
+
+### 5. Fail Loudly in Development
+In development (`NODE_ENV !== 'production'`), crashes should be noisy.
+In production, all unhandled errors go to a log file, not stdout, and
+the process stays alive (PM2 handles restarts).
+
+---
+
+## Repository Structure (Variant B)
+
+```
+docnet/
+├── CLAUDE.md                        ← You are here (V2)
+├── docnet.config.json               ← Still used for analysis config
+│
+├── api_server.ts                    ← Express entry point
+├── build.sh                         ← Build script (now also runs DB migrations)
+│
+├── auth/
+│   ├── middleware.ts                ← JWT verification, attaches req.user
+│   ├── passwords.ts                 ← bcrypt helpers
+│   └── tokens.ts                    ← JWT sign/verify helpers
+│
+├── routes/
+│   ├── auth.ts                      ← POST /api/auth/register, /login, /logout
+│   ├── projects.ts                  ← CRUD /api/projects
+│   ├── upload.ts                    ← POST /api/projects/:id/upload (PDF + URL)
+│   ├── jobs.ts                      ← GET /api/jobs/:id (status polling)
+│   └── graph.ts                     ← All graph/analysis endpoints (from api_server.ts)
+│
+├── worker/
+│   ├── index.ts                     ← Worker entry point (run by PM2 separately)
+│   ├── queue.ts                     ← Job queue (PostgreSQL-backed)
+│   ├── processors/
+│   │   ├── pdf.ts                   ← PDF extraction + analysis
+│   │   └── web.ts                   ← Web crawler + analysis
+│   └── pipeline.ts                  ← Shared analysis logic (calls Claude API)
+│
+├── storage/
+│   ├── IStorageAdapter.ts           ← Interface (unchanged from V1)
+│   ├── SqliteAdapter.ts             ← V1 implementation (keep, don't modify)
+│   └── PostgresAdapter.ts           ← V2 implementation
+│
+├── db/
+│   ├── schema.sql                   ← Complete PostgreSQL schema
+│   ├── migrate.ts                   ← Migration runner
+│   └── migrations/
+│       ├── 001_initial.sql          ← Users, projects, base tables
+│       ├── 002_jobs.sql             ← Job queue table
+│       └── 003_crawler.sql          ← Web source tracking
+│
+├── analysis_pipeline/               ← Unchanged from V1 (still used by worker)
+│
+└── network-ui/                      ← React frontend (extended with new pages)
+    └── src/
+        ├── pages/
+        │   ├── Login.tsx
+        │   ├── Register.tsx
+        │   ├── ProjectList.tsx      ← Dashboard: all user's projects
+        │   ├── ProjectDetail.tsx    ← Upload + graph for one project
+        │   └── Graph.tsx            ← Moved from App.tsx
+        ├── components/              ← All existing components unchanged
+        ├── hooks/
+        │   ├── useAuth.ts           ← Auth context + JWT management
+        │   └── useJobs.ts           ← Job status polling
+        └── api.ts                   ← Extended with auth + project endpoints
+```
+
+---
+
+## Database Schema (PostgreSQL)
+
+### New tables (Variant B adds these)
+
 ```sql
--- Documents table
-CREATE TABLE documents (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  doc_id TEXT UNIQUE NOT NULL,
-  file_path TEXT NOT NULL,
-  one_sentence_summary TEXT NOT NULL,      -- AI-generated brief summary
-  paragraph_summary TEXT NOT NULL,         -- AI-generated detailed summary
-  date_range_earliest TEXT,                -- Earliest date mentioned in document
-  date_range_latest TEXT,                  -- Latest date mentioned in document
-  category TEXT NOT NULL,                  -- Document category
-  content_tags TEXT NOT NULL,              -- JSON array of content tags
-  analysis_timestamp TEXT NOT NULL,        -- When analysis was performed
-  input_tokens INTEGER,                    -- Claude API usage metrics
-  output_tokens INTEGER,
-  cache_read_tokens INTEGER,
-  cost_usd REAL,                          -- Estimated API cost
-  error TEXT,                             -- Error message if analysis failed
-  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-  full_text TEXT                          -- Complete document text for search
+-- Users
+CREATE TABLE users (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  email TEXT UNIQUE NOT NULL,
+  password_hash TEXT NOT NULL,
+  display_name TEXT NOT NULL,
+  role TEXT NOT NULL DEFAULT 'reporter',   -- 'reporter' | 'admin'
+  created_at TIMESTAMPTZ DEFAULT NOW()
 );
-CREATE INDEX idx_documents_doc_id ON documents(doc_id);
-CREATE INDEX idx_documents_category ON documents(category);
 
--- RDF triples (relationships)
-CREATE TABLE rdf_triples (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  doc_id TEXT NOT NULL,
-  timestamp TEXT,                         -- When the event occurred
-  actor TEXT NOT NULL,                    -- Subject of the relationship
-  action TEXT NOT NULL,                   -- Action/verb
-  target TEXT NOT NULL,                   -- Object of the relationship
-  location TEXT,                          -- Where the event occurred
-  actor_likely_type TEXT,                 -- Type of actor (person, organization, etc.)
-  triple_tags TEXT,                       -- JSON array of tags
-  explicit_topic TEXT,                    -- Explicit subject matter
-  implicit_topic TEXT,                    -- Inferred subject matter
-  sequence_order INTEGER NOT NULL,        -- Order within document
-  top_cluster_ids TEXT,                   -- JSON array of top 3 cluster IDs (materialized)
-  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-  FOREIGN KEY (doc_id) REFERENCES documents(doc_id) ON DELETE CASCADE
+-- Projects (one user can have many)
+CREATE TABLE projects (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  description TEXT,
+  config JSONB,                            -- stores docnet.config.json overrides
+  status TEXT NOT NULL DEFAULT 'active',  -- 'active' | 'archived'
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
 );
-CREATE INDEX idx_rdf_triples_doc_id ON rdf_triples(doc_id);
-CREATE INDEX idx_rdf_triples_actor ON rdf_triples(actor);
-CREATE INDEX idx_rdf_triples_timestamp ON rdf_triples(timestamp);
-CREATE INDEX idx_top_cluster_ids ON rdf_triples(top_cluster_ids);
 
--- Entity aliases (deduplication)
-CREATE TABLE entity_aliases (
-  original_name TEXT PRIMARY KEY,
-  canonical_name TEXT NOT NULL,
-  reasoning TEXT,                         -- LLM explanation for the merge
-  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  created_by TEXT DEFAULT 'llm_dedupe'    -- Source of the alias
+-- Job queue
+CREATE TABLE jobs (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  type TEXT NOT NULL,                      -- 'pdf' | 'web'
+  status TEXT NOT NULL DEFAULT 'pending', -- 'pending'|'running'|'done'|'error'
+  payload JSONB NOT NULL,                  -- { filePath } or { url, depth }
+  progress INTEGER DEFAULT 0,             -- 0–100
+  result JSONB,
+  error TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  started_at TIMESTAMPTZ,
+  completed_at TIMESTAMPTZ
+);
+
+-- Web sources (tracks crawled URLs per project)
+CREATE TABLE web_sources (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  url TEXT NOT NULL,
+  title TEXT,
+  crawled_at TIMESTAMPTZ DEFAULT NOW(),
+  doc_count INTEGER DEFAULT 0
 );
 ```
 
-#### 3. Tag Clustering (`analysis_pipeline/cluster_tags.ts`)
-**Purpose:** Group 1400+ tags into semantic clusters
-**Input:** All unique tags from database
-**Output:** `tag_clusters.json` with 21 clusters
-**Process:**
-1. Collect all unique tags from triples
-2. Use Claude to create semantic clusters (Legal, Financial, Travel, etc.)
-3. Iteratively refine clusters for consistency
-4. Generate human-readable cluster names and exemplars
+### Existing tables (modified for Variant B)
 
-#### 4. Entity Deduplication (`analysis_pipeline/dedupe_with_llm.ts`)
-**Purpose:** Merge duplicate entity mentions
-**Input:** Entity names from database
-**Output:** `entity_aliases` table mapping variants to canonical names
-**Process:**
-1. Identify potential duplicates using fuzzy matching
-2. Use Claude to determine if entities are the same person
-3. Create alias mappings (e.g., "Jeff Epstein" → "Jeffrey Epstein")
-4. API server resolves aliases in real-time
+The `documents`, `rdf_triples`, `entity_aliases`, `canonical_entities`,
+and `docnet_metadata` tables already have `project_id TEXT NOT NULL DEFAULT 'default'`.
 
-#### 5. Migration Scripts
-**`add_top_clusters_column.ts`**
-- Adds `top_cluster_ids` column to `rdf_triples`
-- Computes top 3 clusters for each triple based on tag matches
-- Creates index for fast filtering
-- Improves query performance by 10x+
-
-**`add_misc_cluster.ts`**
-- Creates "Misc" cluster (ID: 20) for uncategorized content
-- Assigns triples without cluster matches to Misc
-- Ensures all triples have at least one label
+In PostgreSQL, change `project_id TEXT` to `project_id UUID NOT NULL` with
+a foreign key to `projects(id)`. Add `user_id UUID REFERENCES users(id)` to
+`documents` for direct ownership queries.
 
 ---
 
-### API Server (`api_server.ts`)
+## Auth Flow
 
-**Purpose:** Express.js backend serving data and frontend
-**Port:** 3001 (configurable via `PORT` env var)
-**Technology:** Express, better-sqlite3, CORS
+```
+POST /api/auth/register  { email, password, displayName }
+  → hash password with bcrypt (rounds: 12)
+  → insert into users
+  → create default project for new user
+  → return { token, user }
 
-#### Key Endpoints
+POST /api/auth/login  { email, password }
+  → find user by email
+  → bcrypt.compare
+  → sign JWT: { userId, email, role }, expires 7d
+  → return { token, user }
 
-**`GET /api/stats`**
-- Returns database statistics (document count, triple count, actor count)
-- Shows top document categories
+All protected routes:
+  → Authorization: Bearer <token>
+  → authMiddleware: verify JWT, attach req.user = { id, email, role }
+  → ownership checks per route
+```
 
-**`GET /api/tag-clusters`**
-- Returns all 21 tag clusters with metadata
-- Includes cluster names, exemplar tags, and tag counts
-
-**`GET /api/relationships?limit=15000&clusters=0,1,2`**
-- Returns relationship network filtered by clusters
-- Applies distance-based pruning centered on Jeffrey Epstein
-- Returns metadata: `{ relationships, totalBeforeLimit, totalBeforeFilter }`
-- Uses materialized `top_cluster_ids` for fast filtering
-
-**`GET /api/actor/:name/relationships?clusters=0,1,2`**
-- Returns all relationships for a specific actor
-- Handles entity aliases (resolves variants to canonical names)
-- Filtered by selected tag clusters
-- Returns: `{ relationships, totalBeforeFilter }`
-
-**`GET /api/search?q=query`**
-- Searches for actors by name
-- Returns fuzzy matches with relationship counts
-
-**`GET /api/document/:docId`**
-- Returns document metadata
-- Includes category, doc_id, file path
-
-**`GET /api/document/:docId/text`**
-- Returns full document text
-- Used for document viewer modal
-
-#### Performance Optimizations
-- **Materialized Clusters:** Pre-computed top 3 clusters per triple
-- **Indexed Columns:** Indexes on `top_cluster_ids`, `actor`, `target`
-- **Database Limits:** 100k row limit to prevent memory exhaustion
-- **Alias Resolution:** Efficient LEFT JOIN on entity_aliases
-- **Rate Limiting:** 1000 requests per 15 minutes per IP
+JWT secret from `process.env.JWT_SECRET` (required in production).
+Never hardcode a secret.
 
 ---
 
-### Visualization Interface
+## Job Queue Pattern
 
-#### Frontend Architecture (`network-ui/`)
-
-**Technology Stack:**
-- **React 18** with TypeScript
-- **Vite** for build tooling
-- **TailwindCSS** for styling
-- **react-force-graph-2d** for network visualization
-- **D3.js** for force simulation
-
-#### Key Components
-
-**`App.tsx`** - Main application container
-- Manages global state (relationships, selected actor, filters)
-- Loads tag clusters and enables all by default
-- Coordinates data fetching and updates
-- Handles desktop/mobile layout switching
-
-**`NetworkGraph.tsx`** - Force-directed graph visualization
-- Renders nodes (actors) and links (relationships)
-- Node size based on connection count
-- Click actors to select/deselect
-- Zoom and pan controls
-- Performance: Handles 15,000+ relationships smoothly
-
-**`Sidebar.tsx`** - Desktop left sidebar
-- Displays database statistics
-- Actor search with autocomplete
-- Relationship limit slider (100-20,000)
-- Tag cluster filter buttons
-- Document category breakdown
-
-**`RightSidebar.tsx`** - Desktop right sidebar (actor details)
-- Shows when actor is selected
-- Timeline view of actor's relationships
-- "Showing X of Y relationships" indicator
-- Document links with click-to-view
-
-**`MobileBottomNav.tsx`** - Mobile navigation
-- Tabbed interface: Search, Timeline, Filters
-- Condensed version of desktop sidebars
-- Touch-optimized controls
-
-**`DocumentModal.tsx`** - Full-text document viewer
-- Displays complete document text
-- Highlights actor names in context
-- Scrollable with close button
-- Fetches text on demand
-
-#### State Management
-
-**Global State (in App.tsx):**
 ```typescript
-const [stats, setStats] = useState<Stats | null>(null);
-const [tagClusters, setTagClusters] = useState<TagCluster[]>([]);
-const [relationships, setRelationships] = useState<Relationship[]>([]);
-const [totalBeforeLimit, setTotalBeforeLimit] = useState<number>(0);
-const [selectedActor, setSelectedActor] = useState<string | null>(null);
-const [actorRelationships, setActorRelationships] = useState<Relationship[]>([]);
-const [actorTotalBeforeFilter, setActorTotalBeforeFilter] = useState<number>(0);
-const [limit, setLimit] = useState(isMobile ? 5000 : 15000);
-const [enabledClusterIds, setEnabledClusterIds] = useState<Set<number>>(new Set());
-```
+// Enqueueing (in upload route):
+const job = await queue.enqueue({
+  projectId: req.params.projectId,
+  type: 'pdf',
+  payload: { filePath: savedPath }
+});
+res.json({ jobId: job.id });
 
-**Data Flow:**
-1. Load tag clusters on mount → enable all clusters
-2. Fetch relationships when limit or clusters change
-3. Fetch actor relationships when actor selected or clusters change
-4. Update graph when relationships change
+// Worker loop (worker/index.ts):
+while (true) {
+  const job = await queue.claim();   // SELECT ... FOR UPDATE SKIP LOCKED
+  if (!job) { await sleep(2000); continue; }
+  
+  try {
+    await queue.setRunning(job.id);
+    await processJob(job);           // calls pdf.ts or web.ts
+    await queue.setDone(job.id);
+  } catch (err) {
+    await queue.setError(job.id, err.message);
+  }
+}
 
-#### Responsive Design
-- **Desktop (>1024px):** Dual sidebar layout with main graph
-- **Mobile (<1024px):** Full-screen graph with bottom navigation
-- **Adaptive Limits:** Mobile defaults to 5k relationships, desktop 15k
-
-### Local Development
-```bash
-# Install dependencies
-npm install
-cd network-ui && npm install && cd ..
-
-# Run API server
-npx tsx api_server.ts
-
-# Run frontend (separate terminal)
-cd network-ui && npm run dev
-
-# Access:
-# - API: http://localhost:3001
-# - Frontend: http://localhost:5173
+// Client polling (useJobs.ts hook):
+// GET /api/jobs/:id  every 3 seconds until status === 'done' | 'error'
 ```
 
 ---
 
-## Key Files Reference
+## File Storage
 
-### Analysis Scripts
-| File | Purpose | When to Run |
-|------|---------|-------------|
-| `analysis_pipeline/analyze_documents.ts` | Main AI analysis | After impactful schema changes or adding new docs |
-| `analysis_pipeline/cluster_tags.ts` | Create tag clusters | After major tag changes |
-| `analysis_pipeline/dedupe_with_llm.ts` | Deduplicate entities | After analyzing new documents |
+Uploaded PDFs are stored at: `/var/docnet/uploads/{projectId}/{originalFilename}`
+(or `./uploads/` in development, relative to project root).
 
-## License
+Path is set via `UPLOAD_DIR` environment variable.
+Default: `./uploads` (development), `/var/docnet/uploads` (production).
 
-MIT License - See LICENSE file for details
+Never store file paths with user-controlled input unsanitized.
+Always use `path.join(UPLOAD_DIR, projectId, sanitizedFilename)`.
 
-## Contact
+---
 
-For questions or issues, please open a GitHub issue.
+## Web Crawler
 
-**Repository:** https://github.com/maxandrews/Epstein-doc-explorer
+Module: `worker/processors/web.ts`
+
+```typescript
+interface CrawlConfig {
+  url: string;        // Starting URL
+  maxDepth: number;   // 0 = only this page, 1 = linked pages, 2 = two levels
+  domainOnly: boolean; // Only crawl pages on the same domain
+  maxPages: number;   // Hard cap, default 50
+}
+```
+
+Implementation strategy:
+1. Use `node-fetch` + `cheerio` for static pages (fast)
+2. Fall back to `playwright` for pages that require JS rendering
+   (detect by checking if cheerio parse yields meaningful text)
+3. Extract: title, main text content (strip nav/footer/sidebar)
+4. Each page becomes one document entry, same pipeline as PDFs
+5. Track crawled URLs in `web_sources` table (no duplicates per project)
+
+Playwright is heavy — install it only if needed. Start with cheerio-only
+and add playwright support in a second pass.
+
+---
+
+## Environment Variables (Production)
+
+```bash
+NODE_ENV=production
+PORT=3001
+DATABASE_URL=postgresql://docnet:PASSWORD@localhost:5432/docnet
+JWT_SECRET=<random 64-char hex string>
+ANTHROPIC_API_KEY=sk-ant-...
+UPLOAD_DIR=/var/docnet/uploads
+DIST_DIR=/var/docnet/dist
+ACCESS_LOG=/var/log/docnet/access.log
+ERROR_LOG=/var/log/docnet/error.log
+```
+
+---
+
+## What Not to Change
+
+- `storage/IStorageAdapter.ts` interface
+- `analysis_pipeline/` directory (worker calls these directly)
+- All existing React components in `network-ui/src/components/`
+  (they are wrapped, not replaced — Graph.tsx is the new home of App.tsx logic)
+- The `project_id` column naming convention
+- The RDF triple schema (actor, action, target, etc.)
+- The tag clustering format in `tag_clusters.json`
+
+---
+
+## Code Style
+
+- TypeScript strict mode everywhere
+- `async/await` only — no raw Promise chains
+- All SQL via parameterized queries — never string concatenation
+- UUIDs for all primary keys (PostgreSQL `gen_random_uuid()`)
+- File: `camelCase.ts` backend, `PascalCase.tsx` React
+- Routes: `routes/` files export Express Router, imported in `api_server.ts`
+- Errors: always `{ error: string }` JSON with appropriate HTTP status
+- Never `console.log` in production paths — use the logger utility

@@ -1,0 +1,12 @@
+/var/log/docnet/*.log {
+    daily
+    rotate 14
+    compress
+    delaycompress
+    missingok
+    notifempty
+    sharedscripts
+    postrotate
+        pm2 reloadLogs
+    endscript
+}

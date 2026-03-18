@@ -16,6 +16,6 @@
     "declarationMap": true,
     "sourceMap": true
   },
-  "include": ["*.ts"],
+  "include": ["*.ts", "auth/**/*.ts", "db/**/*.ts", "routes/**/*.ts", "storage/**/*.ts", "upload/**/*.ts", "worker/**/*.ts"],
   "exclude": ["node_modules", "dist"]
 }

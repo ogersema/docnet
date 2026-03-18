@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { searchActors } from '../api';
 import type { Stats, Actor, TagCluster } from '../types';
+import { uiConfig } from '../config';
 
 interface SidebarProps {
   stats: Stats | null;
@@ -146,8 +147,8 @@ export default function Sidebar({
     const sliderWidth = rect.width;
 
     // Calculate positions of the two handles as percentages
-    const minPosition = ((localYearRange[0] - 1970) / (2025 - 1970)) * sliderWidth;
-    const maxPosition = ((localYearRange[1] - 1970) / (2025 - 1970)) * sliderWidth;
+    const minPosition = ((localYearRange[0] - uiConfig.yearRangeMin) / (uiConfig.yearRangeMax - uiConfig.yearRangeMin)) * sliderWidth;
+    const maxPosition = ((localYearRange[1] - uiConfig.yearRangeMin) / (uiConfig.yearRangeMax - uiConfig.yearRangeMin)) * sliderWidth;
 
     // Calculate distance from mouse to each handle
     const distanceToMin = Math.abs(mouseX - minPosition);
@@ -174,19 +175,21 @@ export default function Sidebar({
       {/* Header */}
       <div className="px-6 py-3 border-b border-gray-700 flex-shrink-0">
         <h1 className="font-bold text-blue-400" style={{ fontSize: '20px' }}>
-          📊 The Epstein Network
+          {uiConfig.projectName}
         </h1>
-        <a
-          href="https://github.com/maxandrews/Epstein-doc-explorer"
-          target="_blank"
-          rel="noopener noreferrer"
-          className="flex items-center gap-1.5 mt-2 text-xs text-gray-400 hover:text-blue-400 transition-colors"
-        >
-          <span className="underline">Github Repo with data</span>
-          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-4 h-4">
-            <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 6H5.25A2.25 2.25 0 0 0 3 8.25v10.5A2.25 2.25 0 0 0 5.25 21h10.5A2.25 2.25 0 0 0 18 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" />
-          </svg>
-        </a>
+        {uiConfig.repoUrl && (
+          <a
+            href={uiConfig.repoUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center gap-1.5 mt-2 text-xs text-gray-400 hover:text-blue-400 transition-colors"
+          >
+            <span className="underline">Github Repo</span>
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-4 h-4">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 6H5.25A2.25 2.25 0 0 0 3 8.25v10.5A2.25 2.25 0 0 0 5.25 21h10.5A2.25 2.25 0 0 0 18 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" />
+            </svg>
+          </a>
+        )}
       </div>
 
       {/* Stats */}
@@ -263,33 +266,35 @@ export default function Sidebar({
               </div>
 
               {/* Hop Distance Slider */}
-              <div className="mb-4">
-                <label className="block text-sm text-gray-400 mb-2">
-                  Maximum hops from Jeffrey Epstein: {maxHops === null ? 'Any' : maxHops}
-                </label>
-                <div className="flex items-center gap-2">
-                  <input
-                    type="range"
-                    min="1"
-                    max="6"
-                    step="1"
-                    value={maxHops === null ? 6 : maxHops}
-                    onChange={(e) => {
-                      const value = parseInt(e.target.value);
-                      onMaxHopsChange(value === 6 ? null : value);
-                    }}
-                    className="flex-1 h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer"
-                  />
+              {uiConfig.hopFilterEnabled && (
+                <div className="mb-4">
+                  <label className="block text-sm text-gray-400 mb-2">
+                    Maximum hops from {uiConfig.principalName}: {maxHops === null ? 'Any' : maxHops}
+                  </label>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="range"
+                      min="1"
+                      max="6"
+                      step="1"
+                      value={maxHops === null ? 6 : maxHops}
+                      onChange={(e) => {
+                        const value = parseInt(e.target.value);
+                        onMaxHopsChange(value === 6 ? null : value);
+                      }}
+                      className="flex-1 h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer"
+                    />
+                  </div>
+                  <div className="flex justify-between text-xs text-gray-500 mt-1">
+                    <span>1</span>
+                    <span>2</span>
+                    <span>3</span>
+                    <span>4</span>
+                    <span>5</span>
+                    <span>Any</span>
+                  </div>
                 </div>
-                <div className="flex justify-between text-xs text-gray-500 mt-1">
-                  <span>1</span>
-                  <span>2</span>
-                  <span>3</span>
-                  <span>4</span>
-                  <span>5</span>
-                  <span>Any</span>
-                </div>
-              </div>
+              )}
 
               {/* Network Density Slider */}
               <div className="mb-0">
@@ -336,15 +341,15 @@ export default function Sidebar({
                 </label>
                 <div className="relative pt-1">
                   <div className="flex justify-between text-xs text-gray-500 mb-1">
-                    <span>1970</span>
-                    <span>2025</span>
+                    <span>{uiConfig.yearRangeMin}</span>
+                    <span>{uiConfig.yearRangeMax}</span>
                   </div>
                   <div className="relative h-6" onMouseMove={handleSliderMouseMove}>
                     {/* Max year slider */}
                     <input
                       type="range"
-                      min="1970"
-                      max="2025"
+                      min={uiConfig.yearRangeMin}
+                      max={uiConfig.yearRangeMax}
                       step="1"
                       value={localYearRange[1]}
                       onChange={(e) => {
@@ -362,8 +367,8 @@ export default function Sidebar({
                     {/* Min year slider */}
                     <input
                       type="range"
-                      min="1970"
-                      max="2025"
+                      min={uiConfig.yearRangeMin}
+                      max={uiConfig.yearRangeMax}
                       step="1"
                       value={localYearRange[0]}
                       onChange={(e) => {
@@ -383,8 +388,8 @@ export default function Sidebar({
                       <div
                         className="absolute h-2 bg-blue-600 rounded-lg"
                         style={{
-                          left: `${((localYearRange[0] - 1970) / (2025 - 1970)) * 100}%`,
-                          right: `${100 - ((localYearRange[1] - 1970) / (2025 - 1970)) * 100}%`,
+                          left: `${((localYearRange[0] - uiConfig.yearRangeMin) / (uiConfig.yearRangeMax - uiConfig.yearRangeMin)) * 100}%`,
+                          right: `${100 - ((localYearRange[1] - uiConfig.yearRangeMin) / (uiConfig.yearRangeMax - uiConfig.yearRangeMin)) * 100}%`,
                         }}
                       />
                     </div>
@@ -415,7 +420,7 @@ export default function Sidebar({
                   type="text"
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  placeholder="e.g., Jeffrey Epstein"
+                  placeholder={uiConfig.searchPlaceholder}
                   className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg text-sm focus:outline-none focus:border-blue-500"
                 />
 

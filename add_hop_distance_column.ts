@@ -1,4 +1,5 @@
 import Database from 'better-sqlite3';
+import { config } from './config';
 
 const db = new Database('document_analysis.db');
 
@@ -64,9 +65,9 @@ for (const edge of edges) {
 
 console.log(`✓ Built graph with ${adjacencyList.size} unique actors\n`);
 
-// Step 4: BFS from Jeffrey Epstein to calculate hop distances
-console.log('Calculating hop distances from Jeffrey Epstein using BFS...');
-const PRINCIPAL = 'Jeffrey Epstein';
+// Step 4: BFS from principal to calculate hop distances
+const PRINCIPAL = config.principal.name || '';
+console.log(`Calculating hop distances from ${PRINCIPAL} using BFS...`);
 
 const hopDistances = new Map<string, number>();
 const queue: { name: string; distance: number }[] = [{ name: PRINCIPAL, distance: 0 }];

@@ -1,14 +1,14 @@
 #!/usr/bin/env node
 
-// Please note: this method uses the agents SDK and assume you are already locally authenticated via claude code via a MAX plan.
-// Running this with the API rather than the max plan will cost about $50 for the 2000 epstein emails
+// Please note: this method uses the agents SDK and assumes you are already locally authenticated via claude code via a MAX plan.
 import { query } from '@anthropic-ai/claude-agent-sdk';
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import Database from 'better-sqlite3';
+import { config } from '../config';
 
 // Model configuration
-const ANALYSIS_MODEL = 'claude-haiku-4-5'; // Fast and cost-effective for document analysis
+const ANALYSIS_MODEL = config.analysis.model;
 
 interface RDFTriple {
   timestamp?: string; // ISO format YYYY-MM-DDTHH:MM or date YYYY-MM-DD
@@ -60,7 +60,8 @@ function initDatabase(dbPath: string): Database.Database {
   db.exec(`
     CREATE TABLE IF NOT EXISTS documents (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
-      doc_id TEXT UNIQUE NOT NULL,
+      project_id TEXT NOT NULL DEFAULT 'default',
+      doc_id TEXT NOT NULL,
       file_path TEXT NOT NULL,
       one_sentence_summary TEXT NOT NULL,
       paragraph_summary TEXT NOT NULL,
@@ -75,7 +76,8 @@ function initDatabase(dbPath: string): Database.Database {
       cache_read_tokens INTEGER,
       cost_usd REAL,
       error TEXT,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE(project_id, doc_id)
     );
   `);
 
@@ -83,6 +85,7 @@ function initDatabase(dbPath: string): Database.Database {
   db.exec(`
     CREATE TABLE IF NOT EXISTS rdf_triples (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
+      project_id TEXT NOT NULL DEFAULT 'default',
       doc_id TEXT NOT NULL,
       timestamp TEXT,
       actor TEXT NOT NULL,
@@ -99,6 +102,28 @@ function initDatabase(dbPath: string): Database.Database {
     );
   `);
 
+  // Create entity_aliases table
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS entity_aliases (
+      project_id TEXT NOT NULL DEFAULT 'default',
+      original_name TEXT NOT NULL,
+      canonical_name TEXT NOT NULL,
+      reasoning TEXT,
+      created_by TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY(project_id, original_name)
+    );
+  `);
+
+  // Create docnet_metadata table
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS docnet_metadata (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+  `);
+
   // Create indexes for efficient querying
   db.exec(`
     CREATE INDEX IF NOT EXISTS idx_documents_doc_id ON documents(doc_id);
@@ -108,8 +133,65 @@ function initDatabase(dbPath: string): Database.Database {
     CREATE INDEX IF NOT EXISTS idx_rdf_triples_timestamp ON rdf_triples(timestamp);
   `);
 
+  // Pre-seed principal aliases from config
+  if (config.principal.name && config.principal.aliases.length > 0) {
+    const insertAlias = db.prepare(`
+      INSERT OR IGNORE INTO entity_aliases (original_name, canonical_name, reasoning, created_by)
+      VALUES (?, ?, 'Configured in docnet.config.json', 'config')
+    `);
+    const insertMany = db.transaction((aliases: string[]) => {
+      for (const alias of aliases) {
+        insertAlias.run(alias, config.principal.name);
+      }
+    });
+    insertMany(config.principal.aliases);
+    console.log(`✓ Seeded ${config.principal.aliases.length} principal aliases`);
+  }
+
+  // Store config snapshot in metadata
+  const configSnapshot = JSON.stringify(config);
+  db.prepare(`
+    INSERT OR REPLACE INTO docnet_metadata (key, value) VALUES ('config', ?)
+  `).run(configSnapshot);
+  db.prepare(`
+    INSERT OR REPLACE INTO docnet_metadata (key, value) VALUES ('created_at', ?)
+  `).run(new Date().toISOString());
+
   console.log(`✓ Database initialized at: ${dbPath}\n`);
   return db;
+}
+
+/**
+ * Build principal context preamble from config
+ */
+function buildPrincipalContext(): string {
+  const p = config.principal;
+  if (!p.name) return '';
+
+  const aliasBullets = p.aliases.map(a => `- ${a}`).join('\n');
+
+  return `
+**PRINCIPAL ENTITY IDENTIFICATION:**
+This document collection centers on: ${p.name}
+
+This entity may appear under these alternative identifiers:
+${aliasBullets || '(no aliases configured)'}
+
+When you see ANY of these identifiers as a sender, participant, or actor, you MUST use "${p.name}" as the canonical actor name in your RDF triples.
+`.trim();
+}
+
+/**
+ * Build actor examples from config
+ */
+function buildActorExamples(): string {
+  if (config.principal.name) {
+    return `- Good: actor: "${config.principal.name}" (when you see their aliases)
+  - Good: actor: "Full Name of Person"
+  - Bad: Using an alias instead of the canonical name`;
+  }
+  return `- Good: actor: "Full Name of Person"
+  - Bad: actor: "FBI" (organization), actor: "the investigation" (abstract)`;
 }
 
 /**
@@ -127,23 +209,17 @@ ${contextPreamble}
 
 ` : '';
 
-  const analysisPrompt = `You are analyzing a document from a legal/investigative document collection. The document ID is "${docId}".
+  const principalSection = buildPrincipalContext();
+  const principalBlock = principalSection
+    ? `\n${principalSection}\n`
+    : '';
+
+  const analysisPrompt = `You are analyzing a document from a document collection. The document ID is "${docId}".
 
 IMPORTANT: You have ALL the information you need in the document text below. Do NOT attempt to read files, explore directories, or gather additional context. Analyze ONLY the text provided.
 
 ${preambleSection}
-
-**CRITICAL IDENTIFICATION RULES:**
-This document may contain communications involving Jeffrey Epstein. He may appear under these identifiers:
-- Email: jeeitunes@gmail.com
-- Email: e:jeeitunes@gmail.com
-- Name: jee
-- Name: Jeffrey Epstein
-- Name: Jeffrey
-- Name: Epstein
-
-When you see ANY of these identifiers as a sender, participant, or actor, you MUST use "Jeffrey Epstein" as the actor name in your RDF triples. DO NOT use "jee", "unknown person", or any other placeholder.
-
+${principalBlock}
 Here is the document text:
 \`\`\`
 ${content}
@@ -165,14 +241,14 @@ Return ONLY a valid JSON object with the following structure:
   "paragraph_summary": "A detailed paragraph (3-5 sentences) explaining the document's content, context, significance, and key points. Include who is involved, what happened, why it matters, and any important outcomes or implications.",
   "date_range_earliest": "YYYY-MM-DD or YYYY-MM-DDTHH:MM format if dates are visible in the document, otherwise null",
   "date_range_latest": "YYYY-MM-DD or YYYY-MM-DDTHH:MM format if dates are visible in the document, otherwise null",
-  "category": "One of: court_filing, email, letter, memorandum, report, transcript, financial_document, media_article, book_excerpt, photo_caption, mixed_document, public record, other",
+  "category": "One of: ${config.analysis.documentCategories.join(', ')}",
   "content_tags": ["array", "of", "relevant", "document-level", "tags"], //aim for 5-10
   "rdf_triples": [
     {
       "timestamp": "YYYY-MM-DD or YYYY-MM-DDTHH:MM if available, otherwise omit this field",
-      "actor": "PERSON NAME ONLY - Use 'Jeffrey Epstein' when you see jeeitunes@gmail.com or 'jee'",
+      "actor": "PERSON NAME ONLY - always use the full canonical name of the person",
       "action": "the action verb (e.g., 'sent email to', 'met with', 'testified before', 'paid', 'attended')",
-      "target": "PERSON NAME ONLY - not organizations, movies, places (e.g., 'Donald Trump', not 'Donald Trump at party' or '12 Years a Slave')",
+      "target": "PERSON NAME ONLY - not organizations, movies, places (e.g., 'Jane Doe', not 'Jane Doe at party')",
       "location": "physical location if mentioned (e.g., 'Mar-a-Lago', 'New York City', 'Palm Beach courthouse'), otherwise omit this field",
       "actor_likely_type": "OPTIONAL - only include if actor is unknown/unnamed/redacted AND there is sufficient evidence to infer their likely type. Type of person - examples include but are not limited to: 'victim', 'witness', 'celebrity', 'political operator', 'staff member', 'law enforcement', 'family member', 'business associate', 'government official'. Use the most specific and appropriate type based on context. Omit entirely if actor is named OR if type cannot be reasonably inferred from context.",
       "tags": ["tags", "for", "this", "triple"], //aim for 3 or less if possible
@@ -187,24 +263,21 @@ Guidelines for RDF triples:
 - Create a sequential array capturing the key relationships and events in the document
 - Include timestamps when dates/times are mentioned in the document
 - **CRITICAL - Actor field**: Actor must ALWAYS be a PERSON NAME ONLY
-  - ✅ Good: actor: "Jeffrey Epstein" (when you see jeeitunes@gmail.com or jee)
-  - ✅ Good: actor: "Donald Trump", "Ghislaine Maxwell"
-  - ❌ Bad: actor: "jee" (use "Jeffrey Epstein" instead)
-  - ❌ Bad: actor: "FBI" (organization), actor: "United States" (country), actor: "the investigation" (abstract)
+  ${buildActorExamples()}
   - Only actual human persons can be actors
 - **Target field**: Target can be a person, place, organization, or entity
-  - ✅ Good: target: "Donald Trump" (person), target: "Hong Kong" (place), target: "FBI" (organization), target: "Mar-a-Lago" (location)
-  - ✅ Good: target: "12 Years a Slave" (movie/book), target: "United States Congress" (organization)
-  - ❌ Bad: target: "Donald Trump at Mar-a-Lago" (don't combine person with location)
+  - Good: target: "John Smith" (person), target: "Hong Kong" (place), target: "FBI" (organization)
+  - Good: target: "United States Congress" (organization)
+  - Bad: target: "John Smith at headquarters" (don't combine person with location)
   - If target is a location, ALSO include it in the location field
 - **Unknown/Redacted persons**: Use placeholders like "unknown person A", "unknown person B" ONLY when referring to actual unnamed PEOPLE
   - ✅ Good: "unknown person A" for an unnamed victim or redacted individual
-  - ❌ Bad: "unknown person A" as placeholder for Jeffrey Epstein when you see jeeitunes@gmail.com or jee
+  - Bad: Using an alias instead of the canonical name for a known entity
   - **NEW**: When actor is unknown/unnamed/redacted AND you can reasonably infer their type, include "actor_likely_type" field
     - Examples include but are not limited to: "victim", "witness", "celebrity", "political operator", "staff member", "law enforcement", "family member", "business associate", "government official", "legal counsel", "journalist", "minor", "employee", "associate"
     - Choose the most specific and contextually appropriate type that can be reasonably inferred
     - **IMPORTANT**: Only include this field if there is clear contextual evidence. If uncertain or speculative, omit the field entirely rather than guessing
-- Use consistent naming (e.g., always "Jeffrey Epstein" not "Epstein" or "Jeffrey" or "jee")
+- Use consistent naming (always use the full canonical name of a person)
 - Actions should be descriptive verb phrases (e.g., "met with", "sent email to", "testified before", "traveled to")
 - Focus on person-to-person AND person-to-entity relationships and interactions
 - Order triples chronologically when timestamps are available, otherwise by document order
@@ -215,9 +288,9 @@ Guidelines for RDF triples:
 - Tags should describe the nature or context of the specific interaction, but NOT the document category
 - Be specific and descriptive (use snake_case for multi-word tags)
 - Examples of triple tags:
-  - For "Jeffrey Epstein sent email to Bill Clinton about fundraising": ["political_fundraising", "personal_correspondence", "VIP"]
+  - For "Person A sent email to Person B about fundraising": ["political_fundraising", "personal_correspondence", "VIP"]
   - For "Jane Doe testified before grand jury regarding sexual assault": ["witness_testimony", "sexual_assault_allegations", "grand_jury"]
-  - For "Donald Trump met with Vladimir Putin in Helsinki": ["diplomatic_meeting", "international_relations", "summit", "foreign_policy"]
+  - For "Person A met with Person B in Helsinki": ["diplomatic_meeting", "international_relations", "summit", "foreign_policy"]
   - For "John Smith transferred $50,000 to offshore account": ["financial_transactions", "offshore_banking", "money_transfer"]
 - Triple tags should be more specific than document-level tags and should not reproduce document level tags
 - Include 1-4 tags per triple depending on complexity
@@ -230,7 +303,7 @@ Guidelines for RDF triples:
 - **implicit_topic**: What the interaction LIKELY relates to or implies, even if not directly stated
   - Examples: "relationship cultivation", "reputation management", "legal strategy coordination", "power networking", "financial concealment", "influence building"
 - These help with semantic search and understanding the PURPOSE behind interactions
-- Example for "Jeffrey Epstein met with Bill Clinton at Mar-a-Lago":
+- Example for "Person A met with Person B at a private venue":
   - explicit_topic: "social meeting at private club"
   - implicit_topic: "high-level networking and relationship building"
 - Example for "Jane Doe testified before grand jury":
@@ -665,6 +738,11 @@ async function main() {
   }
 
   console.log(`\nTotal documents analyzed in this run: ${totalProcessed}`);
+
+  // Export hook (no-op in Variant A)
+  if (config.export?.enabled) {
+    console.log('Export hook: enabled but not implemented in Variant A');
+  }
 
   db.close();
 

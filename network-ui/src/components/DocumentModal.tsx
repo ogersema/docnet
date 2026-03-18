@@ -234,6 +234,16 @@ export default function DocumentModal({ docId, highlightTerm, secondaryHighlight
             {document && (
               <div className="space-y-1 text-sm">
                 <p className="text-gray-300">{document.one_sentence_summary}</p>
+                {document.file_path && /^https?:\/\//.test(document.file_path) && (
+                  <a
+                    href={document.file_path}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1 text-blue-400 hover:text-blue-300 text-xs"
+                  >
+                    View original page &rarr;
+                  </a>
+                )}
                 <div className="flex gap-4 text-gray-500">
                   <span className="px-2 py-1 bg-gray-700 rounded">{document.category}</span>
                   {document.date_range_earliest && (

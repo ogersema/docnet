@@ -6,6 +6,7 @@ import MobileBottomNav from './components/MobileBottomNav';
 import { WelcomeModal } from './components/WelcomeModal';
 import { fetchStats, fetchRelationships, fetchActorRelationships, fetchTagClusters, fetchActorCounts } from './api';
 import type { Stats, Relationship, TagCluster } from './types';
+import { uiConfig } from './config';
 
 function App() {
   // Detect if mobile on initial load (lg breakpoint is 1024px in Tailwind)
@@ -19,13 +20,13 @@ function App() {
   const [selectedActor, setSelectedActor] = useState<string | null>(null);
   const [actorRelationships, setActorRelationships] = useState<Relationship[]>([]);
   const [actorTotalBeforeFilter, setActorTotalBeforeFilter] = useState<number>(0);
-  const [limit, setLimit] = useState(isMobile ? 5000 : 9600);
-  const [maxHops, setMaxHops] = useState<number | null>(3); // Default 3 hops
-  const [minDensity, setMinDensity] = useState(50); // Default 50% density threshold
+  const [limit, setLimit] = useState(isMobile ? uiConfig.mobileLimit : uiConfig.defaultLimit);
+  const [maxHops, setMaxHops] = useState<number | null>(uiConfig.hopFilterEnabled ? 3 : null);
+  const [minDensity, setMinDensity] = useState(0); // Default 0% — show all nodes
   const [enabledClusterIds, setEnabledClusterIds] = useState<Set<number>>(new Set());
   const [enabledCategories, setEnabledCategories] = useState<Set<string>>(new Set());
-  const [yearRange, setYearRange] = useState<[number, number]>([1980, 2025]);
-  const [includeUndated, setIncludeUndated] = useState(false);
+  const [yearRange, setYearRange] = useState<[number, number]>([uiConfig.yearRangeMin, uiConfig.yearRangeMax]);
+  const [includeUndated, setIncludeUndated] = useState(uiConfig.includeUndatedDefault);
   const [keywords, setKeywords] = useState('');
   const [actorTotalCounts, setActorTotalCounts] = useState<Record<string, number>>({});
   const [showWelcome, setShowWelcome] = useState(() => {

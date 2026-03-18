@@ -1,3 +1,16 @@
+# Claude Code settings (may contain command history with secrets)
+.claude/
+
+# User uploads
+uploads/
+upload/
+
+# Database files
+*.db
+
+# Project-specific config (contains project-specific settings)
+docnet.config.json
+
 # Dependencies
 node_modules/
 network-ui/node_modules/

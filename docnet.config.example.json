@@ -1,0 +1,146 @@
+{
+  "_comment": "DocNet configuration file. Copy this to docnet.config.json and edit for your project.",
+  "_version": "1.0.0",
+
+  "project": {
+    "_comment": "Basic project identity – shown in the browser UI",
+
+    "name": "My Document Network",
+    "description": "A network visualization of relationships extracted from my document collection.",
+
+    "repoUrl": null,
+    "_repoUrl_comment": "Optional URL shown as a link in the sidebar header. Set to null to hide.",
+
+    "accentColor": "blue",
+    "_accentColor_comment": "UI accent color. One of: blue, green, purple, orange, red"
+  },
+
+  "principal": {
+    "_comment": [
+      "The 'principal' is the central entity in your document network.",
+      "The hop-distance filter measures how many relationship-steps separate",
+      "every other actor from this entity.",
+      "",
+      "Set name to null to disable hop-distance filtering entirely.",
+      "This is the right choice when your corpus has no clear central figure,",
+      "or when you want to explore the full network without a focal point."
+    ],
+
+    "name": null,
+    "_name_examples": [
+      "Jeffrey Epstein",
+      "Enron Corporation",
+      "Company XYZ",
+      null
+    ],
+
+    "aliases": [],
+    "_aliases_comment": [
+      "Alternative names, email addresses, or identifiers that refer to the principal.",
+      "The AI extractor will canonicalize all of these to principal.name in the database.",
+      "Example: ['jeeitunes@gmail.com', 'jee', 'J. Epstein']"
+    ],
+
+    "hopFilterDefault": 3,
+    "_hopFilterDefault_comment": "Default value for the hop-distance slider in the UI (1–5, or null for 'Any').",
+
+    "hopFilterEnabled": false,
+    "_hopFilterEnabled_comment": [
+      "Whether to show the hop-distance filter slider in the UI at all.",
+      "Set to false when principal.name is null, or when all actors",
+      "are equally important regardless of distance from the principal."
+    ]
+  },
+
+  "analysis": {
+    "_comment": "Controls the AI extraction pipeline (analyze_documents.ts)",
+
+    "model": "claude-haiku-4-5",
+    "_model_comment": [
+      "Claude model used for document analysis.",
+      "claude-haiku-4-5  – fastest, cheapest (~$0.003 per 1k tokens)",
+      "claude-sonnet-4-6 – more accurate, ~5x more expensive",
+      "Use Haiku for large corpora (>500 docs), Sonnet for precision work."
+    ],
+
+    "documentCategories": [
+      "court_filing",
+      "email",
+      "letter",
+      "memorandum",
+      "report",
+      "transcript",
+      "financial_document",
+      "media_article",
+      "book_excerpt",
+      "photo_caption",
+      "mixed_document",
+      "public_record",
+      "other"
+    ],
+    "_documentCategories_comment": [
+      "The list of valid document categories injected into the AI prompt.",
+      "Customize for your domain. Examples:",
+      "  Medical: clinical_note, lab_report, discharge_summary, prescription",
+      "  Corporate: memo, contract, board_minutes, audit_report, press_release",
+      "  Legal: pleading, deposition, exhibit, affidavit, judgment"
+    ],
+
+    "yearRangeMin": 1970,
+    "yearRangeMax": 2025,
+    "_yearRange_comment": [
+      "The year range for the time-filter slider in the UI.",
+      "Set to the earliest and latest years plausibly found in your documents.",
+      "Example for modern corporate docs: 2000 / 2025",
+      "Example for historical archive: 1900 / 1990"
+    ],
+
+    "includeUndatedDefault": false,
+    "_includeUndatedDefault_comment": "Whether undated relationships are shown by default in the UI."
+  },
+
+  "ui": {
+    "_comment": "Text content shown in the frontend. Customize for your corpus.",
+
+    "welcomeTitle": "Welcome to My Document Network",
+
+    "welcomeBody": "This is a network analysis tool for exploring relationships between people, places, and events extracted from a document collection.\n\nAI was used to extract these relationships from the raw document text. Some errors and omissions are possible.\n\nClick on a relationship in the timeline after selecting an actor to see the source document with highlighted entities.",
+
+    "howToUse": [
+      "Search for actors using the search bar",
+      "Click on nodes in the graph to explore their relationships",
+      "Use filters to focus on specific content categories",
+      "Click document links in the timeline to view source documents"
+    ],
+
+    "searchPlaceholder": "Search entities...",
+    "_searchPlaceholder_example": "e.g., John Smith, Acme Corp",
+
+    "defaultRelationshipLimit": 9600,
+    "_defaultRelationshipLimit_comment": "Number of relationships shown on desktop by default (100–25000).",
+
+    "mobileRelationshipLimit": 3000,
+    "_mobileRelationshipLimit_comment": "Number of relationships shown on mobile by default.",
+
+    "aiAttributionNote": "Relationships were extracted using Claude AI. Verify important findings against source documents.",
+    "_aiAttributionNote_comment": "Shown as a disclaimer in the welcome modal."
+  },
+
+  "export": {
+    "_comment": [
+      "Settings for Variant E (Hybrid export). Unused in Variant A.",
+      "When enabled, the pipeline bundles outputs into a portable .docnet archive",
+      "that can be opened without a server."
+    ],
+    "enabled": false,
+    "outputPath": "./export.docnet",
+    "includeFullText": true
+  },
+
+  "server": {
+    "_comment": "Server configuration. Can also be set via environment variables (env vars take priority).",
+    "port": 3001,
+    "dbPath": "document_analysis.db",
+    "allowedOrigins": []
+  }
+}
