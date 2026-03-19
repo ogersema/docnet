@@ -15,10 +15,14 @@ cd ..
 echo "=== Syncing code to VPS ==="
 rsync -avz --delete \
   --exclude='.git' \
+  --exclude='.claude' \
   --exclude='node_modules' \
   --exclude='network-ui/node_modules' \
   --exclude='uploads' \
+  --exclude='upload/*.pdf' \
+  --exclude='upload/*.xlsx' \
   --exclude='storage/*.db' \
+  --exclude='*.db' \
   --exclude='.env' \
   --exclude='docnet.config.json' \
   . ${VPS_USER}@${VPS_HOST}:${APP_DIR}/
