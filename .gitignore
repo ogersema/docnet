@@ -1,9 +1,11 @@
 # Claude Code settings (may contain command history with secrets)
 .claude/
 
-# User uploads
+# User uploads (data directories, not source code)
 uploads/
-upload/
+upload/*.pdf
+upload/*.txt
+upload/*.xlsx
 
 # Database files
 *.db

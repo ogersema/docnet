@@ -1,5 +1,6 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import multer from 'multer';
+import path from 'path';
 import { authMiddleware } from '../auth/middleware.js';
 import { requireProjectOwner } from './projects.js';
 import { uploadMiddleware } from '../upload/fileHandler.js';
@@ -32,17 +33,23 @@ router.post('/',
       return res.status(400).json({ error: 'No files uploaded' });
     }
 
-    const jobs = await Promise.all(files.map(file =>
-      queue.enqueue({
+    const jobs = await Promise.all(files.map(file => {
+      const ext = path.extname(file.originalname).toLowerCase();
+      // All file types currently processed by the pdf pipeline;
+      // derive type explicitly to enable future per-type processors
+      const jobType = ext === '.pdf' ? 'pdf'
+        : ['.xlsx', '.xls', '.csv'].includes(ext) ? 'pdf'
+        : 'pdf';
+      return queue.enqueue({
         projectId: req.params.projectId,
-        type: 'pdf',
+        type: jobType,
         payload: {
           filePath: file.path,
           originalName: file.originalname,
           mimeType: file.mimetype
         }
-      })
-    ));
+      });
+    }));
 
     res.json({
       queued: jobs.length,
